@@ -1,3 +1,9 @@
+'===========================================
+'HIGH SPEED READING WITH OPC'
+'Aplicación con SUBSCRIPCIONES OPC UA'
+'@Author: VÍCTOR BELLO CUEVAS
+'==========================================
+
 Imports System
 Imports OpcLabs.EasyOpc.UA
 Imports OpcLabs.EasyOpc.UA.OperationModel
