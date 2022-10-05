@@ -1,0 +1,290 @@
+'===========================================
+'HIGH SPEED READING WITH OPC'
+'Aplicación con SUBSCRIPCIONES OPC UA'
+'@Author: VÍCTOR BELLO CUEVAS
+'==========================================
+
+Imports System                                  'Imports de librerias
+Imports OpcLabs.EasyOpc.UA
+Imports OpcLabs.EasyOpc.UA.OperationModel
+Imports Excel = Microsoft.Office.Interop.Excel
+Imports System.Data.SqlClient
+Imports OpcLabs.EasyOpc.UA.AddressSpace
+Imports OpcLabs.EasyOpc.UA.Discovery
+Imports OpcLabs.EasyOpc.UA.Extensions
+Imports OpcLabs.EasyOpc.UA.Gds
+
+
+Namespace DataTypeNode
+
+    Public Module GlobalVariables       'Variables modo Public para tener acceso en toda la aplicación
+        'Variables CONEXIÓN SQL
+        Public SQL_Connection As SqlConnection  'Conexión
+        Public SQL_Command As SqlCommand        'Querys
+        Public SQL_Connection_String As String  'Cadena para la query
+
+        'Variables CONFIGURACIÓN SQL
+        Public Nombre_Tabla As String = "Estrategia_Storm_01"     'Nonbre  tabla para SQL - CAMBIAR CADA VEZ
+        Public Reader As SqlDataReader                      'Data para lectura de SQL
+        Public i As Integer
+
+        'Arrays definidos para las 54 VARIABLES y su INDEX
+        Public Names_Array(54) As String    'Arrays dependiendo del número de variables-SE DEBE MODIFICAR SI CAMBIA LA CONFIGURACIÓN
+        Public IDs_Array(54) As Integer     'Arrays para los IDs-SE DEBE MODIFICAR SI CAMBIA LA CONFIGURACIÓN
+        Public Item_Index As Integer
+
+        'String para PARADA de emergencia MOTOR
+        Public Nodo_Activar_ATV As String = "ns=3;s=""ATV_Siemens_SCADA"".""Variables_ATV""[5]"     'Cadena OPC UA para deter el motor en cualquier momento si hay un fallo durante la ejecución de la aplicación
+
+        'Variables NOTIFICACIÓN
+        Public String_Name As String                            'Nombre de la varaible en estructura OPC UA
+        Public String_Valor As String                           'Valor de la variable
+        Public Final_String_Name As String                      'Nombre final 
+        Public String_DateTime As String                        'Datetimes
+        Public String_DateTime_2 As String                      'Datetimes
+        Public Len As Integer                                   'Longitud de la cadena
+        Public String_Status As String                          'Status OPC UA
+        Public SQL_Insert_Notificacion As String                'Query de inserción
+        Public String_PM As String = "Registros_PM8000Izda"     'Variable PM para diferenciar del ATV
+        Public Valor_InStr As Integer = 45                      'Valor correspondiente si PM en la cadena
+        Public String_Comparacion As Integer                    'Comparación entre ATV y PM
+
+    End Module
+    Public Class Program        'Programa
+
+        Public Shared Sub Main()
+
+            SQL_Connection_String = "Data Source=SIEMENS1\SQLEXPRESS;Initial Catalog=SUPPRESS;User ID=Suppress;Password=Control;"       'String de conexión a la base de datos creada con usuario y contraseña ODBC
+            SQL_Connection = New SqlConnection(SQL_Connection_String)                                                                   'Creación del objeto SQL
+            SQL_Connection.Open()                                                                                                       'Apertura de la conexión (Para todo el programa)
+
+            Dim SQL_Statement_Array_Names As String = "SELECT Variable_Name From Table_IDs_Names"           'Array Query para lectura de la tabla IDs-Index (lectura NOMBRES)
+            SQL_Command = New SqlCommand(SQL_Statement_Array_Names, SQL_Connection)                         'Comando con la query
+            Reader = SQL_Command.ExecuteReader()                                                            'Ejecución de la query para leer la tabla
+
+            For i = 1 To 54                                             'Almacenamos en el bucle los datos-MODIFICAR PARÁMETRO DEL FOR dependiendo de las variables de la tabla
+                Reader.Read()                                           'Ejecución comando
+                Names_Array(i) = Reader("Variable_Name").ToString()
+                'Console.WriteLine(Names_Array(i))
+            Next
+            SQL_Command.Dispose()                                       'Eliminación de recursos que no se utilizaran más
+            Reader.Close()                                              'Cerramos la lectura
+
+            Dim SQL_Statement_Array_IDs As String = "SELECT ID From Table_IDs_Names"    'Array Query para lectura de la tabla IDs-Index (Lectura INDEX)
+            SQL_Command = New SqlCommand(SQL_Statement_Array_IDs, SQL_Connection)       'Comando con la query
+            Reader = SQL_Command.ExecuteReader()                                        'Ejecución de la query para leer la tabla
+
+            For i = 1 To 54                                 'Almacenamos en el bucle los datos-MODIFICAR PARÁMETRO DEL FOR dependiendo de las variables de la tabla
+                Reader.Read()                               'Ejecución comando
+                IDs_Array(i) = Reader("ID").ToString()
+            Next
+            SQL_Command.Dispose()                           'Eliminación de recursos que no se utilizaran más
+            Reader.Close()                                  'Cerramos la lectura
+
+            Dim SQL_Statement_Table As String                                   'String para la tabla que almacenara los datos en la SQL
+            SQL_Statement_Table = "CREATE TABLE " & Nombre_Tabla & " (Key_ID INT NOT NULL IDENTITY PRIMARY KEY , ID varchar(MAX), Fecha_hora_SERVER varchar(MAX), Fecha_hora_SOURCE varchar(MAX), Fecha_hora_VB varchar(MAX), Value varchar(MAX), Status varchar(MAX))"
+            SQL_Command = New SqlCommand(SQL_Statement_Table, SQL_Connection)   'Parametros anteriormente definidos introducidos en el comando de ejecución
+            SQL_Command.ExecuteNonQuery()                                       'Ejecución del comando anterior
+            SQL_Command.Dispose()                                               'Eliminación de recursos que no se utilizaran más
+
+
+            If Err.Number = 0 Then                                                      'Código de error e impresión de tabla creada si no hay errores
+                Console.WriteLine("Tabla Creada")
+                System.Threading.Thread.Sleep(2000)                                     'Tiempo de espera tras crear la tabla para reducir la sobrecarga del sistema
+            Else
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"      'Impresion por pantalla del error
+                Console.WriteLine(ErrorDesc)
+                SQL_Connection.Close()
+                SQL_Connection = Nothing
+                SQL_Command = Nothing
+                Exit Sub
+            End If
+
+            Dim EndPoint As UAEndpointDescriptor = New UAEndpointDescriptor("opc.tcp://10.1.0.128:4840").WithUserNameIdentity("usuario", "Control20")                    'Conexión con el servidor OPC-UA, endpoint y usuario y contraseña
+            Dim ClientManagement As New EasyUAClientManagement                                                                                                           'Objeto OPC UA para poder configurar el cliente en cuanto a seguridad
+            EasyUAClient.SharedParameters.EngineParameters.CertificateAcceptancePolicy.AllowUserAcceptCertificate = True                                                 'Mostrar la solicitud de aceptar el certificado siempre
+            ClientManagement.SharedParameters.EngineParameters.ApplicationParameters.ApplicationManifest.InstanceOwnStorePath = "C:\Users\ciclab\Desktop\TFM Victor"     'Carpeta para almacenar los certificados
+            Dim Client_OPC = New EasyUAClient()                                                                                                                          'Creación del objeto cliente y su conexión
+
+            Dim Timestamp As String
+            Dim Node_Descriptor_1 As UANodeDescriptor = "ns=3;s=""Registros_procesados"".""Registros_ATV_Izda"""            'Nodo OPC UA correspondiente a ATV-Iquierda
+            Dim Node_Descriptor_2 As UANodeDescriptor = "ns=3;s=""Registros_procesados"".""Registros_PM8000Izda"""          'Nodo OPC UA correspondiente a PM-Izquierda
+
+            AddHandler Client_OPC.DataChangeNotification, AddressOf Client_OPC_DataChangeNotification_AllInObject           'Cabecera para las notificaciones por SUBSCRIPCIÓN
+
+            Dim NodeElementCollection As UANodeElementCollection                                                            'Objeto para lecturas de los nodos definidos anteriormente
+
+
+            Timestamp = DateTime.Now.ToString("yyyy/MM/dd hh:mm:ss.fff")                                                    'Indicamos que se va a iniciar la subscipción mediante un timestamp
+            Console.WriteLine("Inicio subscripción a las: {0}", Timestamp)
+            Console.WriteLine("========================")
+
+
+            Dim UaSubscriptionParameters As New UASubscriptionParameters(publishingInterval:=1000, priority:=Byte.MaxValue)              'Publish publicacion// envio (minimo en 250 PLC)- Añadimos la máxima prioridad por si existen más clientes OPC UA
+            Dim UAMonitoringParameters = New UAMonitoringParameters(samplingInterval:=250, dataChangeFilter:=Nothing, queueSize:=10)     'Sampling muestreo (mínimo 100 en el plc), sin filtro al ser una lectura global y con la cola máxima en valor de 10
+            ' Dim UaDataChangeFilter As New UADataChangeFilter(absoluteDeadbandValue:=0.5)                                                'Filtro no definido
+
+            ' Console.WriteLine("Confiruación envíada por el cliente al servidor OPC")                                                                              'IMPRIMIMOS POR PANTALLA LOS VALORES ESTABLECIDOS ANTERIORMENTE
+            ' Console.WriteLine("Publish Interval: {0} ms, con prioridad {1}", UaSubscriptionParameters.PublishingInterval, UaSubscriptionParameters.Priority)
+            ' Console.WriteLine("Publish interval default: {0}", UASubscriptionParameters.DefaultPublishingInterval.ToString())
+            ' Console.WriteLine("Sampling Interval: {0} ms", UAMonitoringParameters.SamplingInterval)
+            ' Console.WriteLine("Filtro aplicado: {0}", UAMonitoringParameters.DataChangeFilter)
+            ' Console.WriteLine("Queue capacity at server: {0}", Client_OPC.CallbackQueueCapacity.ToString())
+            ' Console.WriteLine("========================")
+
+
+            Try                                                                                                         'Try para probar a leer los nodos
+                NodeElementCollection = Client_OPC.BrowseDataVariables(EndPoint, Node_Descriptor_1)                     'Lectura del nodo correspondiente al Variador
+            Catch uaException As UAException
+                Console.WriteLine("***Failure: {0}", uaException.GetBaseException.Message)                              'En caso de fallo al leer las variables contenidas en los nodos detener la subscripción
+                Exit Sub
+            End Try
+            Console.WriteLine(NodeElementCollection)                                                                    'Se imprimen por pantalla los nodos encontrados, en el siguiente se recogen todos los nodos en un ARRAY y se realiza la subscripción a cada nodo con los parámetros OPC UA establecidos anterioremnte
+            Dim monitoredItemArgumentsArray() As EasyUAMonitoredItemArguments = NodeElementCollection.Select(Function(element) New EasyUAMonitoredItemArguments(dataChangeCallback:=Nothing, state:=Nothing, endpointDescriptor:=EndPoint, nodeDescriptor:=element, monitoringParameters:=UAMonitoringParameters, subscriptionParameters:=UaSubscriptionParameters)).ToArray()
+            Client_OPC.SubscribeMultipleMonitoredItems(monitoredItemArgumentsArray)                                     'Se realiza la SUBSCRIPCIÓN a dichos items OPC UA
+
+            Try                                                                                                         'Try para probar a leer los nodos
+                NodeElementCollection = Client_OPC.BrowseDataVariables(EndPoint, Node_Descriptor_2)                     'Lectura del nodo correspondiente al PM
+            Catch uaException As UAException
+                Console.WriteLine("***Failure: {0}", uaException.GetBaseException.Message)                              'En caso de fallo al leer las variables contenidas en los nodos detener la subscripción
+                Exit Sub
+            End Try
+
+            Console.WriteLine(NodeElementCollection)                                                                    'Se imprimen por pantalla los nodos encontrados, en el siguiente se recogen todos los nodos en un array y se realiza la subscripción a cada nodo con los parámetros OPC UA establecidos anterioremnte
+            Dim monitoredItemArgumentsArray2() As EasyUAMonitoredItemArguments = NodeElementCollection.Select(Function(element) New EasyUAMonitoredItemArguments(dataChangeCallback:=Nothing, state:=Nothing, endpointDescriptor:=EndPoint, nodeDescriptor:=element, monitoringParameters:=UAMonitoringParameters, subscriptionParameters:=UaSubscriptionParameters)).ToArray()
+            Client_OPC.SubscribeMultipleMonitoredItems(monitoredItemArgumentsArray2)                                    'Se realiza la SUBSCRIPCIÓN a dichos items OPC UA
+
+            If Err.Number = 0 Then                                                      'Código de error e impresión de tabla creada si no hay errores
+                Console.WriteLine("Nodos listos para las lecturas")
+                System.Threading.Thread.Sleep(2000)                                     'Tiempo de espera tras crear la tabla para reducir la sobrecarga del sistema
+            Else
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"      'Impresion por pantalla del error
+                Console.WriteLine(ErrorDesc)
+                SQL_Connection.Close()
+                SQL_Connection = Nothing
+                SQL_Command = Nothing
+
+                Exit Sub
+            End If
+
+
+            Console.WriteLine("========================")                               'Se indica el tiempo de procesamiento de la subscripcón en MS -Máximo para la librería de gratuita 30 mins - Posibilidad de ampliar a 24 con licencia
+            Console.WriteLine("Procesando datos durante 30 minutos....")
+            Threading.Thread.Sleep(1740 * 1000)
+            Console.WriteLine("========================")
+
+            Timestamp = DateTime.Now.ToString("yyyy/MM/dd hh:mm:ss.fff")
+            Console.WriteLine("Deteniendo subscripción a las: {0}", Timestamp)          'Tras finalizar la subscripción se indica la hora
+            Console.WriteLine("Deteniendo motores...")
+            Client_OPC.WriteValue(EndPoint, Nodo_Activar_ATV, 0)                        'Y se detienen los motres mediante la cadena OPC UA definida al inicio
+            Client_OPC.UnsubscribeAllMonitoredItems()                                   'Se cierran todas las subscripciones
+
+            If Err.Number <> 0 Then                                                     'En caso de errores codigo de verificación, se detiene el motor, se cierran las subscripciones y se reinicializan los objectos
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                Console.WriteLine(ErrorDesc)
+                Client_OPC = Nothing
+                EndPoint = Nothing
+                Client_OPC.UnsubscribeAllMonitoredItems()
+                Client_OPC.WriteValue(EndPoint, Nodo_Activar_ATV, 0)
+                Exit Sub
+            End If
+
+
+
+        End Sub
+
+        Public Shared Sub Client_OPC_DataChangeNotification_AllInObject(ByVal sender As Object, ByVal Notificacion As EasyUADataChangeNotificationEventArgs)        'Evento de NOTIFICACIÓN en caso de cambios en los valores de las variables SUBSCRITAS
+
+            Dim Timestamp As String
+
+
+            If Notificacion.Succeeded Then                                                                                                      'SI EXISTE NOTIFICACIÓN ENTONCES...
+                'Console.WriteLine("========NUEVA NOTIFICACIÓN========")                                                                        'Se muestras los parámetros de la subscripción 
+                'Console.WriteLine("Sampling interval configurado: {0}", Notificacion.Arguments.MonitoringParameters.SamplingInterval)
+                ''Console.WriteLine("Queue size configurada: {0}", Notificacion.Arguments.MonitoringParameters.QueueSize)
+                'Console.WriteLine("Discard Oldest: {0}", Notificacion.Arguments.MonitoringParameters.DiscardOldest)
+                'Console.WriteLine("Publishing interval: {0}", Notificacion.Arguments.SubscriptionParameters.PublishingInterval)
+                'Console.WriteLine("Prioridad: {0}", Notificacion.Arguments.SubscriptionParameters.Priority)
+                'Console.WriteLine("--------------------------------")
+
+                String_Name = Notificacion.Arguments.NodeDescriptor.ToString()                                          'Se obtiene la cadena OPC UA que ha sido notificada                        
+                'Console.WriteLine("Cadena completa: {0}", String_Name)
+
+                String_Comparacion = InStr(String_Name, String_PM)                                                      'Comparación para determinar si es ATV o PM segun la cadena obtenida 
+                'Console.WriteLine("Tipo de dato (0 = ATV // 45 = PM): {0}", String_Comparacion)
+
+                String_Valor = Notificacion.AttributeData.Value                                                         'Valor OPC UA
+                ' Console.WriteLine("Valor: {0}", String_Valor)
+
+                String_Status = Notificacion.AttributeData.StatusCode.ToString()                                        'Valor del STATUS OPC UA a string para su posterior impresion
+                'Console.WriteLine("Status de la variable: {0}", String_Status)
+
+                Timestamp = DateTime.Now.ToString("yyyy/MM/dd hh:mm:ss.fff")                                            'Timestamp correspondiente a la NOTIFICACIÓN (PUBLISH)
+                'Console.WriteLine("Timestamp del VB: {0}", Timestamp)
+
+                String_DateTime = Notificacion.AttributeData.ServerTimestamp.ToString("yyyy/MM/dd hh:mm:ss.fff")        'Timestamp correspondiente al SERVIDOR (SAMPLING)
+                'Console.WriteLine("Hora SERVIDOR de la adquisición: {0}", String_DateTime)
+
+                String_DateTime_2 = Notificacion.AttributeData.SourceTimestamp.ToString("yyyy/MM/dd hh:mm:ss.fff")      'Timestamp correspondiente al SOURCE (SAMPLING)
+                'Console.WriteLine("Hora SOURCE de la adquisición: {0}", String_DateTime_2)
+
+
+                If String_Comparacion = Valor_InStr Then                                    'IF PARA DETERMINAR la ejecución del código dependiendo del DISPOSITIVO: Es una PM8000 si la cadena anterior es 45
+                    Len = String_Name.Length                                                'Longitud total de la cadena del PM
+                    'Console.WriteLine("Longitud total de la cadena: {0}", Len)
+
+                    Final_String_Name = String_Name.Substring(67, Len - 67 - 1)             'Inicio siempre en 67 si es una PM, y se eliminan los 67 primero y los 2 ultimos(se quitan comillas) OBTENIENDO EL NOMBRE OPC UA SIMPLIFICADO
+                    ' Console.WriteLine("Nombre final: {0}", Final_String_Name)
+
+                    Item_Index = Array.IndexOf(Names_Array, Final_String_Name)              'Comprobación del nombre en el ARRAY de INDEX y obtención del nñumero que le corresponde
+                    'Console.WriteLine("Index correspondiente: {0}", Item_Index)
+
+                    SQL_Insert_Notificacion = "INSERT INTO " & Nombre_Tabla & " (ID, Fecha_hora_SERVER, Fecha_hora_SOURCE, Fecha_hora_VB, Value, Status)" & " VALUES " & "('" & Item_Index & "','" & String_DateTime & "','" & String_DateTime & "','" & Timestamp & "', '" & String_Valor & "', '" & String_Status & "')"
+                    ''Console.WriteLine(SQL_Insert_Notificacion)
+                    'Console.WriteLine("----------------------")
+
+                    SQL_Command = New SqlCommand(SQL_Insert_Notificacion, SQL_Connection)   'Parametros anteriormente definidos introducidos en el comando de ejecución con LA NOTIFICACIÖN A LA SQL
+                    SQL_Command.ExecuteNonQuery()                                           'Ejecución del comando anterior
+                    SQL_Command.Dispose()                                                   'Eliminación de recursos que no se utilizaran más
+
+
+                Else                                                                        'Si es diferente de 45, entonces ES UN VARIADOR
+                    Len = String_Name.Length                                                'Longitud total de la cadena del ATV71
+                    'Console.WriteLine("Longitud total de la cadena: {0}", Len)
+
+                    Final_String_Name = String_Name.Substring(65, Len - 65 - 1)             'Inicio siempre en 65 si es una PM, y se eliminan los 65 primero y los 2 ultimos(se quitan comillas) OBTENIENDO EL NOMBRE OPC UA SIMPLIFICADO
+                    ' Console.WriteLine("Nombre final: {0}", Final_String_Name)
+
+                    Item_Index = Array.IndexOf(Names_Array, Final_String_Name)              'Comprobación del nombre en el ARRAY de INDEX y obtención del nñumero que le corresponde
+                    'Console.WriteLine("Index correspondiente: {0}", Item_Index)
+
+                    SQL_Insert_Notificacion = "INSERT INTO " & Nombre_Tabla & " (ID, Fecha_hora_SERVER, Fecha_hora_SOURCE, Fecha_hora_VB, Value, Status)" & " VALUES " & "('" & Item_Index & "','" & String_DateTime & "','" & String_DateTime & "','" & Timestamp & "', '" & String_Valor & "', '" & String_Status & "')"
+
+                    'Console.WriteLine(SQL_Insert_Notificacion)
+                    'Console.WriteLine("----------------------")
+
+                    SQL_Command = New SqlCommand(SQL_Insert_Notificacion, SQL_Connection)   'Parametros anteriormente definidos introducidos en el comando de ejecución con LA NOTIFICACIÖN A LA SQL
+                    SQL_Command.ExecuteNonQuery()                                           'Ejecución del comando anterior
+                    SQL_Command.Dispose()                                                   'Eliminación de recursos que no se utilizaran más
+
+                End If
+
+                If Err.Number <> 0 Then                                                     'Rutina de espera antes del siguiente paso y rutina de error
+                    Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                    Console.WriteLine(ErrorDesc)
+
+                    Exit Sub
+                End If
+
+            Else
+                Console.WriteLine("*** Failure: {0}", Notificacion.ErrorMessageBrief)       'En caso de que la NOTIFICACIÓN NO ES EXITOSA se imprime el FALLO
+                SQL_Connection.Close()                                                      'Cerramos la conexión SQL abierta al principio de la aplicación
+
+            End If
+
+        End Sub
+
+
+    End Class
+
+End Namespace
