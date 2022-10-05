@@ -1,0 +1,120 @@
+Imports System
+Imports OpcLabs.EasyOpc.UA
+Imports OpcLabs.EasyOpc.UA.OperationModel
+Imports Excel = Microsoft.Office.Interop.Excel
+Imports System.Data.SqlClient
+
+
+
+Namespace DataTypeNode
+    Public Class Program
+
+        Public Shared Sub Main()
+            On Error Resume Next    'Comando para errores
+
+            Dim Path = "C:\Users\ciclab\Desktop\Excel\HMITags_IDS_Tabla.xlsx"     'Directorio del archivo Excel
+            Dim ExcelObject As New Excel.Application  'Inicialización de los objetos
+            Dim Workbook As Excel.Workbook    'Creación objeto para el Workbook
+            Dim Worksheet As Excel.Worksheet   'Creación objeto para las WorkSheet
+
+            Workbook = ExcelObject.Workbooks.Open(Path)     'Abrimos la dirección en la que se encuentra el archivo con las variables
+            Worksheet = ExcelObject.ActiveWorkbook.Sheets(1)    'Página del Workbook
+
+            ExcelObject.Visible = False     'Visualización de objetos y alertas Excel
+            ExcelObject.DisplayAlerts = True
+
+            Dim Rwcnt As Integer = Worksheet.UsedRange.Rows.CountLarge  'Número de filas en el archivo de variables
+
+            Dim Arr_Celdas_ATV1(Rwcnt) As String     'Definición array de nombres de variables
+            Dim Fila_ATV1 As Integer     'Definición variable filas del Excel
+            Dim Columna_ATV1 As String = "A"     'Simpre se lee solo la primera columna
+
+            For Fila_ATV1 = 1 To Rwcnt
+                Arr_Celdas_ATV1(Fila_ATV1) = Worksheet.Range(Columna_ATV1 & Fila_ATV1).Value    'Array con los valores de las celdas
+                'Console.WriteLine(Arr_Celdas_ATV1(Fila_ATV1))
+                'Console.WriteLine("----------------------")
+            Next
+
+            If Err.Number = 0 Then
+                Console.WriteLine("Variables obtenidas")
+                System.Threading.Thread.Sleep(2000)
+            Else
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                Console.WriteLine(ErrorDesc)
+                ExcelObject = Nothing
+                Workbook = Nothing
+                Workbook.Close()
+                ExcelObject.Quit()
+                Exit Sub
+            End If
+
+            Workbook.Close()    'Cerramos el Workbook utilizado
+            ExcelObject.Quit()  'Cerramos los objetos Excel
+            ExcelObject = Nothing   'Reinicilizamos los objetos Excel
+            Workbook = Nothing
+            Worksheet = Nothing
+
+            Dim SQL_Connection As SqlConnection   'Creamos objeto para la conexión de la SQL
+            Dim SQL_Command As SqlCommand   'Comandos de ejecución
+            Dim SQL_Connection_String As String     'Directivas de conexión al SQL
+            SQL_Connection_String = "Data Source=SIEMENS1\SQLEXPRESS;Initial Catalog=SUPPRESS;User ID=Suppress;Password=Control;"
+            SQL_Connection = New SqlConnection(SQL_Connection_String)   'Conexión y características de la misma
+            SQL_Connection.Open()   'Apertura de conexón con la base de datos
+
+
+            If Err.Number = 0 Then
+                Console.WriteLine("Conexión establecida con la SQL")
+                System.Threading.Thread.Sleep(2000)
+            Else
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                Console.WriteLine(ErrorDesc)
+                ExcelObject = Nothing
+                Exit Sub
+            End If
+            Dim Statement_Table As String
+            Statement_Table = "CREATE TABLE Table_IDs_Names (ID varchar(MAX), Variable_Name varchar(MAX))"
+            SQL_Command = New SqlCommand(Statement_Table, SQL_Connection)   'Parametros anteriormente definidos introducidos en el comando de ejecución
+            SQL_Command.ExecuteNonQuery()   'Ejecución del comando anterior
+            SQL_Command.Dispose()
+
+            Dim i As Integer
+            Dim Numero(Rwcnt) As String
+
+            For i = 1 To Rwcnt
+                Numero(i) = i
+            Next
+
+            Dim SQL_Insert(Rwcnt) As String
+
+            For Fila_ATV1 = 1 To Rwcnt
+                SQL_Insert(Fila_ATV1) = "INSERT INTO Table_IDs_Names (ID, Variable_Name) VALUES (" & Numero(Fila_ATV1) & ", '" & Arr_Celdas_ATV1(Fila_ATV1) & "')"
+                Console.WriteLine(SQL_Insert(Fila_ATV1))
+                SQL_Command = New SqlCommand(SQL_Insert(Fila_ATV1), SQL_Connection)   'Parametros anteriormente definidos introducidos en el comando de ejecución
+                SQL_Command.ExecuteNonQuery()   'Ejecución del comando anterior
+                SQL_Command.Dispose()
+            Next
+
+
+            If Err.Number = 0 Then
+                Console.WriteLine("Tabla de IDs y Nombres creada")
+                System.Threading.Thread.Sleep(2000)
+            Else
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                Console.WriteLine(ErrorDesc)
+                ExcelObject = Nothing
+                SQL_Connection.Close()
+                SQL_Connection = Nothing
+                Exit Sub
+            End If
+
+
+            SQL_Connection.Close()
+            SQL_Connection = Nothing
+
+
+
+        End Sub
+
+    End Class
+
+End Namespace
