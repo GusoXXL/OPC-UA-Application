@@ -1,0 +1,113 @@
+'=============================
+'CONTROL STRATEGY FOR ENCODER MOTOR'
+'@Author: VÍCTOR BELLO CUEVAS
+'============================
+
+
+Imports System                                      'Imports de las librerías OPC UA
+Imports OpcLabs.EasyOpc.UA
+Imports OpcLabs.EasyOpc.UA.OperationModel
+
+
+Namespace DataTypeNode
+    Public Class Program                                'Inicio del programa
+
+        Public Shared Sub Main()
+            On Error Resume Next    'Comando para errores
+
+            'COMUNICACIÓN OPC UA
+            Dim EndPoint As UAEndpointDescriptor = "opc.tcp://10.1.0.128:4840"                      'Conexión con el servidor OPC-UA
+            Dim Client_OPC = New EasyUAClient()                                                     'Creación del objeto cliente y su conexión
+            Dim Nodo_Frequency As String = "ns=3;s=""ATV_Siemens_SCADA"".""Variables_ATV""[6]"      'Dirección OPC UA correspondiente a la frequencia del motor izquierdo de la bancada mediante el variador ATV71-1
+            Dim Nodo_Activar_ATV As String = "ns=3;s=""ATV_Siemens_SCADA"".""Variables_ATV""[5]"    'Dirección OPC UA correspodniente a la activación del motor izquierdo de la bancada mediante el variador ATV71-1
+
+            'RANDOM NUMBER
+            Dim RandomNumber_Freq As Integer
+            Dim UpperLimit_Freq As Integer
+            Dim DownLimit_Freq As Integer
+            Dim Range_Freq As Integer
+
+            'RANDOM TIME
+            Dim RandomNumber_Time As Integer
+            Dim UpperLimit_Time As Integer
+            Dim DownLimit_Time As Integer
+            Dim Range_Time As Integer
+            Dim Valor As Object
+
+            Dim Timestamp As String
+
+            If Err.Number = 0 Then                                                      'Si no hay ningun error en el programa entonces se ejecuta
+                Console.WriteLine("Activando motor...")                                 'Se imprime por pantalla que se activa el motor y se esperan 5 segundos de seguridad                
+                System.Threading.Thread.Sleep(5000)
+                Client_OPC.WriteValue(EndPoint, Nodo_Activar_ATV, 1)                    'Se escribe por OPC UA al variador ATV71 para la activación del motor izquierdo
+            Else
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"      'En caso de que haya un error se imprime el error y se cierra el Cliente OPC UA
+                Console.WriteLine(ErrorDesc)
+                Client_OPC = Nothing
+                EndPoint = Nothing
+                EasyUAClient.CloseAll()
+            End If
+
+
+            Do While (True)                                                                          'Bucle 
+
+                Randomize()                                                                          'Inicializa la función
+                UpperLimit_Freq = 10                                                                 'Límite superior de 10 en 10 valores positivos
+                DownLimit_Freq = -10                                                                 'Límite Inferior de -10 en -10 valores negativos
+                Range_Freq = 20                                                                      'Rango entre el límite superior y el inferior
+
+                RandomNumber_Freq = ((Math.Ceiling(Rnd() * Range_Freq)) + DownLimit_Freq) * 50       'Función para obtener un valor aleatorio entre los diferentes rangos dentro de los -50 y 50 Hz
+
+                Console.WriteLine("----------------------")
+                Timestamp = DateTime.Now.ToString("MM/dd/yyyy hh:mm:ss.fff")
+                Console.WriteLine(Timestamp)                                                         'Se imprime la fecha y hora para saber a q hora se realizo el cambio de frecuencia en el motor
+                Console.WriteLine("Hz random: {0} Hz", RandomNumber_Freq / 10)
+
+                Client_OPC.WriteValue(EndPoint, Nodo_Frequency, RandomNumber_Freq)                   'Se escribe en el motor la frencuencia aleatoria mediante OPC UA
+
+                If Err.Number <> 0 Then                                                              'Comprobación de errores
+                    Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                    Console.WriteLine(ErrorDesc)
+                    Client_OPC = Nothing
+                    EndPoint = Nothing
+                    EasyUAClient.CloseAll()
+                End If
+
+                UpperLimit_Time = 120                                                               'Límite superior para 2 minutos = 120 s
+                DownLimit_Time = 20                                                                 'Límite Inferior para 20 segundos
+                Range_Time = 100                                                                    'Rango entre el límite superior y el inferior
+                RandomNumber_Time = (Math.Ceiling(Rnd() * Range_Time)) + DownLimit_Time             'Función para determinar un valor de tiempo aleatorio entre los rangos establecidos
+                Console.WriteLine("Tiempo random: {0} s", RandomNumber_Time)
+
+
+                System.Threading.Thread.Sleep(RandomNumber_Time * 1000)                             'Tiempo de espera antes del siguiente ciclo del bucle establecido por la función de tiempos aleatorios y multiplicada por 1000 para pasar de MS a S
+                Console.WriteLine("----------------------")
+
+                If Err.Number <> 0 Then                                                             'Comprobación de errores
+                    Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                    Console.WriteLine(ErrorDesc)
+                    Client_OPC = Nothing
+                    EndPoint = Nothing
+                    EasyUAClient.CloseAll()
+                    Client_OPC.WriteValue(EndPoint, Nodo_Activar_ATV, 0)
+                End If
+
+                If Client_OPC.ReadValue(EndPoint, Nodo_Activar_ATV) = 0 Then                        'Si el motor esta a cero, entonces salir del bucle y finalizar programa
+                    Console.WriteLine("Subscripción finalizada por el CLiente OPC UA")
+                    Console.WriteLine("Motor detenido")
+                    Console.WriteLine("----------------------")
+                    Exit Do
+                End If
+
+
+            Loop
+
+            EasyUAClient.CloseAll()                                                                  'Si finaliza el programa cierre del cliente           
+            Client_OPC = Nothing
+            Client_OPC.WriteValue(EndPoint, Nodo_Activar_ATV, 0)                                     'Apagamos el motor izquierdo de la bancada
+
+        End Sub
+
+    End Class
+
+End Namespace
