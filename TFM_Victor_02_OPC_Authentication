@@ -1,0 +1,182 @@
+Imports System
+Imports OpcLabs.EasyOpc.UA
+Imports OpcLabs.EasyOpc.UA.OperationModel
+Imports OpcLabs.EasyOpc.UA.Discovery
+Imports OpcLabs.EasyOpc.UA.Extensions
+Imports OpcLabs.EasyOpc.UA.Gds
+Imports Excel = Microsoft.Office.Interop.Excel
+Imports System.Data.SqlClient
+
+
+
+Namespace DataTypeNode
+    Public Class Program
+
+        Public Shared Sub Main()
+            On Error Resume Next    'Comando para errores
+
+            Dim Path = "C:\Users\ciclab\Desktop\Excel\HMITags_ATV_Izq.xlsx"     'Directorio del archivo Excel
+            'Dim Path = "C:\Users\ciclab\Desktop\Excel\HMITags_ATV_Drch.xlsx"     'Directorio del archivo Excel
+            'Dim Path = "C:\Users\ciclab\Desktop\Excel\HMITags_PM_Izq.xlsx"     'Directorio del archivo Excel
+            'Dim Path = "C:\Users\ciclab\Desktop\Excel\HMITags_PM_Drch.xlsx"     'Directorio del archivo Excel
+            Dim ExcelObject As New Excel.Application  'Inicialización de los objetos
+            Dim Workbook As Excel.Workbook    'Creación objeto para el Workbook
+            Dim Worksheet As Excel.Worksheet   'Creación objeto para las WorkSheet
+
+            Workbook = ExcelObject.Workbooks.Open(Path)     'Abrimos la dirección en la que se encuentra el archivo con las variables
+            Worksheet = ExcelObject.ActiveWorkbook.Sheets(1)    'Página del Workbook
+
+            ExcelObject.Visible = False     'Visualización de objetos y alertas Excel
+            ExcelObject.DisplayAlerts = True
+
+            Dim Rwcnt As Integer = Worksheet.UsedRange.Rows.CountLarge  'Número de filas en el archivo de variables
+
+            Dim Arr_Celdas_ATV1(Rwcnt) As String     'Definición array de nombres de variables
+            Dim Fila As Integer     'Definición variable filas del Excel
+            Dim Columna As String = "A"     'Simpre se lee solo la primera columna
+
+            For Fila = 1 To Rwcnt
+                Arr_Celdas_ATV1(Fila) = Worksheet.Range(Columna & Fila).Value    'Array con los valores de las celdas
+            Next
+
+            If Err.Number = 0 Then
+                Console.WriteLine("Variables obtenidas")
+                System.Threading.Thread.Sleep(2000)
+            Else
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                Console.WriteLine(ErrorDesc)
+                ExcelObject = Nothing
+                Exit Sub
+            End If
+
+            Workbook.Close()    'Cerramos el Workbook utilizado
+            ExcelObject.Quit()  'Cerramos los objetos Excel
+            ExcelObject = Nothing   'Reinicilizamos los objetos Excel
+            Workbook = Nothing
+            Worksheet = Nothing
+
+            '--------------------------------------------------
+
+            Dim SQL_Connection As SqlConnection   'Creamos objeto para la conexión de la SQL
+            Dim SQL_Command As SqlCommand   'Comandos de ejecución
+            Dim SQL_Connection_String As String     'Directivas de conexión al SQL
+            Dim SQL_Statement_Table As String   'Query para el servidor SQL
+
+            SQL_Connection_String = "Data Source=SIEMENS1\SQLEXPRESS;Initial Catalog=SUPPRESS;User ID=Suppress;Password=Control;"
+
+            Dim SQLTable_1 As String
+            Dim Nombre_Tabla As String = "Individual_01"
+            SQLTable_1 = "CREATE TABLE " & Nombre_Tabla & " (Fecha_hora varchar(MAX), """
+            For Fila = 1 To (Rwcnt - 1)
+                SQLTable_1 = SQLTable_1 & Arr_Celdas_ATV1(Fila) & """ varchar(MAX), """
+            Next
+            SQL_Statement_Table = SQLTable_1 & Arr_Celdas_ATV1(Rwcnt) & """" & " varchar(MAX))" 'Unión final de la cadena
+
+            'SQL_Connection = New SqlConnection(SQL_Connection_String)   'Conexión y características de la misma
+            'SQL_Connection.Open()   'Apertura de conexón con la base de datos
+            'SQL_Command = New SqlCommand(SQL_Statement_Table, SQL_Connection)   'Parametros anteriormente definidos introducidos en el comando de ejecución
+            'SQL_Command.ExecuteNonQuery()   'Ejecución del comando anterior
+            'SQL_Command.Dispose()   'Eliminación de recursos que no se utilizaran más
+
+
+            If Err.Number = 0 Then
+                Console.WriteLine("Tabla Creada")
+                System.Threading.Thread.Sleep(2000)
+            Else
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                Console.WriteLine(ErrorDesc)
+                ExcelObject = Nothing
+                Exit Sub
+            End If
+
+            Dim Lectura_OPC(Fila) As String     'Array con los nombres de las variables para la lectura de valores OPC
+
+            Dim Lectura_OPC_1 As String = "ns=3;s=""Registros_procesados"".""Registros_ATV_Izda""."""
+            'Dim Lectura_OPC_1 As String = "ns=3;s=""Registros_procesados"".""Registros_ATVDrcha""."""
+            'Dim Lectura_OPC_1 As String = "ns=3;s=""Registros_procesados"".""Registros_PM8000Izda""."""
+            'Dim Lectura_OPC_1 As String = "ns=3;s=""Registros_procesados"".""Registros_PM8000Drcha""."""
+
+            Dim Lectura_OPC_2(Fila) As String
+            For Fila = 1 To Rwcnt
+                Lectura_OPC_2(Fila) = Arr_Celdas_ATV1(Fila) + """"
+                Lectura_OPC(Fila) = Lectura_OPC_1 + Lectura_OPC_2(Fila)
+            Next
+
+
+            Dim EndPoint As UAEndpointDescriptor = New UAEndpointDescriptor("opc.tcp://10.1.0.128:4840").WithUserNameIdentity("usuario", "Control20")
+            Dim ClientManagement As New EasyUAClientManagement
+            EasyUAClient.SharedParameters.EngineParameters.CertificateAcceptancePolicy.AllowUserAcceptCertificate = True
+            ClientManagement.SharedParameters.EngineParameters.ApplicationParameters.ApplicationManifest.InstanceOwnStorePath = "C:\Users\ciclab\Desktop\TFM Victor"
+            'Dim EndPoint As UAEndpointDescriptor = "opc.tcp://10.1.0.128:4840"     'Conexión con el servidor OPC-UA
+            Dim Client_OPC = New EasyUAClient()  'Creación del objeto cliente y su conexión
+            Dim Lectura_Nodo_OPC(Rwcnt) As Object 'Variable con el valor del nodo OPC
+
+            If Err.Number = 0 Then      'Rutina de espera antes del siguiente paso y rutina de error
+                Console.WriteLine("Cliente OPC conectado")
+                System.Threading.Thread.Sleep(2000)
+
+            Else
+                Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                Console.WriteLine(ErrorDesc)
+                Client_OPC = Nothing
+                EndPoint = Nothing
+                EasyUAClient.CloseAll()
+                Exit Sub
+            End If
+
+            Dim SQL_Insert_Statement As String
+            Dim SQL_Insert As String
+            Dim SQL_Insert_1 As String = "INSERT INTO " & Nombre_Tabla & " (Fecha_hora, """
+            Dim SQL_Insert_2 As String = ""
+            Dim SQL_Insert_3 As String
+            Dim Timestamp As String
+
+            For Fila = 1 To (Rwcnt - 1)
+                SQL_Insert_2 = SQL_Insert_2 & Arr_Celdas_ATV1(Fila) & """, """
+            Next
+            SQL_Insert_2 = SQL_Insert_2 & Arr_Celdas_ATV1(Fila) & """) VALUES "
+            SQL_Insert = SQL_Insert_1 & SQL_Insert_2
+
+
+            Do While (True)     'Bucle cada 100 ms
+
+                Timestamp = DateTime.Now.ToString("MM/dd/yyyy hh:mm:ss.fff tt")   'Función fecha_hora con milisegundos
+
+                For Fila = 1 To Rwcnt       'Lectura por OPC
+                    Lectura_Nodo_OPC(Fila) = Client_OPC.ReadValue(EndPoint, Lectura_OPC(Fila))
+                    Console.WriteLine(Lectura_Nodo_OPC(Fila))
+                Next
+
+                SQL_Insert_3 = "('" & Timestamp & "', '"
+
+                For Fila = 1 To (Rwcnt - 1)
+                    SQL_Insert_3 = SQL_Insert_3 & Lectura_Nodo_OPC(Fila) & "', '"
+                Next
+                SQL_Insert_3 = SQL_Insert_3 & Lectura_Nodo_OPC(Rwcnt) & "')"
+
+                SQL_Insert_Statement = SQL_Insert & SQL_Insert_3
+
+                'SQL_Command = New SqlCommand(SQL_Insert_Statement, SQL_Connection)
+                'SQL_Command.ExecuteNonQuery()   'Ejecuta comando de la linea anterior
+                'SQL_Command.Dispose()
+
+                If Err.Number <> 0 Then
+                    Dim ErrorDesc As String = Err.Description & "(" & Err.Number & ")"
+                    Console.WriteLine(ErrorDesc)
+                    ExcelObject = Nothing
+                    Exit Sub
+                End If
+
+                Threading.Thread.Sleep(100)
+
+            Loop
+
+            SQL_Connection.Close()
+            SQL_Connection = Nothing
+            EasyUAClient.CloseAll()
+
+        End Sub
+
+    End Class
+
+End Namespace
